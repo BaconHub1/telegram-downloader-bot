@@ -12,7 +12,7 @@ import yt_dlp
 TOKEN = "8272287740:AAGZvU8KGZJlLNpBNzfzKHLu1nGthOkyQLY"
 bot = TeleBot(TOKEN)
 
-MAX_FILE_SIZE = 49 * 1024 * 1024  # 49 MB
+MAX_FILE_SIZE = 49 * 1024 * 1024  # 49MB
 SEND_TIMEOUT = 300
 LAST_URL = None
 
@@ -25,17 +25,32 @@ class MyLogger:
     def error(self, msg): print(f"[yt_dlp ERROR] {msg}")
 
 # =========================
-# CLEANUP TEMP DIR
+# CLEANUP
 # =========================
 def cleanup(temp_dir):
     if temp_dir:
-        try: shutil.rmtree(temp_dir, ignore_errors=True)
-        except: pass
+        try:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+        except:
+            pass
 
 # =========================
-# CONVERT AUDIO → MP3
+# CHECK FFmpeg
+# =========================
+def check_ffmpeg():
+    try:
+        subprocess.run(["ffmpeg", "-version"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        return True
+    except FileNotFoundError:
+        print("[ERROR] FFmpeg not found. Install FFmpeg for merging audio/video and mp3 conversion.")
+        return False
+
+# =========================
+# AUDIO → MP3
 # =========================
 def convert_to_mp3(audio_path: Path) -> Path:
+    if not check_ffmpeg():
+        return audio_path
     try:
         mp3_path = audio_path.with_suffix(".mp3")
         subprocess.run([
@@ -56,7 +71,6 @@ def convert_to_mp3(audio_path: Path) -> Path:
 def download_spotify(url: str):
     temp_dir = tempfile.mkdtemp()
     try:
-        # Extract metadata
         with yt_dlp.YoutubeDL({"quiet": True, "noplaylist": True, "extract_flat": True}) as ydl:
             info = ydl.extract_info(url, download=False)
         title = info.get("title") or ""
@@ -67,16 +81,15 @@ def download_spotify(url: str):
             "format": "bestaudio/best",
             "outtmpl": os.path.join(temp_dir, "%(title)s.%(ext)s"),
             "default_search": "ytsearch1:",
-            "quiet": False,
-            "noplaylist": True
+            "quiet": False
         }
+
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(query, download=True)
             file_path = info.get("requested_downloads", [{}])[0].get("filepath") or ydl.prepare_filename(info)
 
         mp3_file = convert_to_mp3(Path(file_path))
         return str(mp3_file), temp_dir
-
     except Exception as e:
         print(f"[SPOTIFY ERROR] {e}")
         cleanup(temp_dir)
@@ -94,12 +107,18 @@ def download_file(url: str):
         "quiet": False,
         "logger": MyLogger(),
         "retries": 5,
-        "http_headers": {"User-Agent": "Mozilla/5.0"},
+        "noplaylist": True,
+        "nocheckcertificate": True,
+        "ignoreerrors": True,
+        "http_headers": {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+        },
         "extractor_args": {
             "instagram": {"impersonate": True},
             "tiktok": {"impersonate": True}
         }
     }
+
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
@@ -119,6 +138,7 @@ def send_media(chat_id, file_path):
         if not path.exists():
             bot.send_message(chat_id, "❌ File missing.")
             return
+
         size_mb = path.stat().st_size // (1024*1024)
         with open(path, "rb") as f:
             if path.suffix.lower() == ".mp3":
@@ -138,8 +158,7 @@ def start(message):
         message.chat.id,
         "🚀 Bot Online!\n\n"
         "• YouTube / TikTok / Instagram → Video\n"
-        "• Spotify → MP3\n"
-        "Send any link to start!"
+        "• Spotify → MP3"
     )
 
 @bot.message_handler(func=lambda m: m.text)
@@ -166,11 +185,8 @@ def handle(message):
             send_media(message.chat.id, file_path)
         else:
             bot.send_message(message.chat.id, "❌ Download failed. Try a different link.")
-
     except Exception as e:
         print(f"[HANDLER ERROR] {e}")
-        try: bot.delete_message(message.chat.id, status.message_id)
-        except: pass
         bot.send_message(message.chat.id, "⚠️ Unexpected error.")
     finally:
         cleanup(temp_dir)
@@ -179,6 +195,5 @@ def handle(message):
 # RUN BOT
 # =========================
 if __name__ == "__main__":
-    print("🚀 Bot running - Spotify → MP3 | Video → YT/IG/TikTok")
-    bot.remove_webhook()  # Fixes 409 conflict
+    print("🚀 Bot running...")
     bot.infinity_polling(timeout=60, long_polling_timeout=60)
