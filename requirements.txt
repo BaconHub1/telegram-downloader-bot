@@ -1,5 +1,2 @@
-import os
-from telebot import TeleBot
-
-TOKEN = os.getenv("TOKEN")
-bot = TeleBot(TOKEN)
+pyTelegramBotAPI==4.14.0
+yt-dlp==2026.3.8
