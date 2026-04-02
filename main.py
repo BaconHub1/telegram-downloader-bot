@@ -1,7 +1,7 @@
 import os
 import shutil
-import tempfile
 import subprocess
+import tempfile
 from pathlib import Path
 from telebot import TeleBot
 import yt_dlp
@@ -9,7 +9,7 @@ import yt_dlp
 # =========================
 # CONFIG
 # =========================
-TOKEN = os.getenv("TOKEN")  # <-- Railway environment variable
+TOKEN = os.getenv("TOKEN")  # <-- Make sure TOKEN is set in Railway Variables
 
 if not TOKEN:
     raise ValueError("TOKEN not set in Railway variables")
@@ -36,8 +36,10 @@ class MyLogger:
 # =========================
 def cleanup(temp_dir):
     if temp_dir:
-        try: shutil.rmtree(temp_dir, ignore_errors=True)
-        except: pass
+        try:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+        except:
+            pass
 
 # =========================
 # AUDIO → MP3
