@@ -2,16 +2,19 @@ import os
 import tempfile
 import shutil
 import subprocess
+import time
 from pathlib import Path
-from telebot import TeleBot
+from telebot import TeleBot, apihelper
 import yt_dlp
 
+# =========================
+# CONFIG
+# =========================
 TOKEN = "8272287740:AAFVY5tHErqaj_llBrBFLnmZskckJEsAE7U"
 bot = TeleBot(TOKEN)
 
 MAX_FILE_SIZE = 49 * 1024 * 1024
 LAST_URL = None
-
 COOKIE_FILE = "cookies.txt"
 
 # =========================
@@ -34,37 +37,27 @@ def safe_download(url, temp_dir, ydl_opts):
         return None
 
 # =========================
-# VIDEO DOWNLOAD (FIXED)
+# VIDEO DOWNLOAD
 # =========================
 def download_file(url):
     temp_dir = tempfile.mkdtemp()
-
     base_opts = {
         "outtmpl": os.path.join(temp_dir, "%(title)s.%(ext)s"),
         "quiet": False,
         "noplaylist": True,
         "retries": 5,
         "http_headers": {"User-Agent": "Mozilla/5.0"},
-    }
-
-    # 🔥 FIRST TRY (best quality)
-    opts1 = {
-        **base_opts,
-        "format": "bestvideo[height<=720]+bestaudio/best",
-        "merge_output_format": "mp4",
         "cookiefile": COOKIE_FILE if os.path.exists(COOKIE_FILE) else None,
     }
 
+    # First attempt: best video+audio (needs ffmpeg)
+    opts1 = {**base_opts, "format": "bestvideo[height<=720]+bestaudio/best", "merge_output_format": "mp4"}
     file_path = safe_download(url, temp_dir, opts1)
 
-    # 🔥 FALLBACK (NO FFMPEG NEEDED)
+    # Fallback: simpler format, no merge required
     if not file_path:
         print("[FALLBACK MODE]")
-        opts2 = {
-            **base_opts,
-            "format": "best[height<=720]",
-            "cookiefile": COOKIE_FILE if os.path.exists(COOKIE_FILE) else None,
-        }
+        opts2 = {**base_opts, "format": "best[height<=720]"}
         file_path = safe_download(url, temp_dir, opts2)
 
     if file_path:
@@ -78,7 +71,6 @@ def download_file(url):
 # =========================
 def download_spotify(url):
     temp_dir = tempfile.mkdtemp()
-
     try:
         with yt_dlp.YoutubeDL({"quiet": True, "extract_flat": True}) as ydl:
             info = ydl.extract_info(url, download=False)
@@ -105,11 +97,10 @@ def download_spotify(url):
         return None, None
 
 # =========================
-# SEND
+# SEND MEDIA
 # =========================
 def send_media(chat_id, file_path):
     path = Path(file_path)
-
     if not path.exists():
         bot.send_message(chat_id, "❌ File missing.")
         return
@@ -118,9 +109,9 @@ def send_media(chat_id, file_path):
 
     with open(path, "rb") as f:
         if path.suffix.lower() in [".mp3", ".m4a"]:
-            bot.send_audio(chat_id, f, caption=f"✅ {size_mb}MB")
+            bot.send_audio(chat_id, f, caption=f"✅ {size_mb} MB")
         else:
-            bot.send_video(chat_id, f, caption=f"✅ {size_mb}MB", supports_streaming=True)
+            bot.send_video(chat_id, f, caption=f"✅ {size_mb} MB", supports_streaming=True)
 
 # =========================
 # HANDLER
@@ -128,17 +119,14 @@ def send_media(chat_id, file_path):
 @bot.message_handler(func=lambda m: m.text)
 def handle(message):
     global LAST_URL
-
     url = message.text.strip()
 
     if not url.startswith("http"):
         return
-
     if url == LAST_URL:
         return
 
     LAST_URL = url
-
     msg = bot.send_message(message.chat.id, "⏳ Downloading...")
     temp_dir = None
 
@@ -157,14 +145,28 @@ def handle(message):
 
     except Exception as e:
         print("[ERROR]", e)
-        bot.send_message(message.chat.id, "⚠️ Error.")
-
+        bot.send_message(message.chat.id, "⚠️ Error occurred.")
     finally:
         cleanup(temp_dir)
 
 # =========================
-# RUN
+# RUN BOT WITH RETRY
 # =========================
+def run_bot():
+    while True:
+        try:
+            print("🚀 Bot running...")
+            bot.infinity_polling(skip_pending=True, timeout=60, long_polling_timeout=60)
+        except apihelper.ApiTelegramException as e:
+            if "409" in str(e):
+                print("⚠️ Telegram 409 Conflict: another session running. Waiting 5s...")
+                time.sleep(5)
+            else:
+                print(f"⚠️ Telegram API error: {e}")
+                time.sleep(5)
+        except Exception as e:
+            print(f"⚠️ Unexpected error: {e}")
+            time.sleep(5)
+
 if __name__ == "__main__":
-    print("🚀 Running...")
-    bot.infinity_polling(skip_pending=True)
+    run_bot()
