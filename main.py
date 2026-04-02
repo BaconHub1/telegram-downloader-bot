@@ -6,10 +6,13 @@ from pathlib import Path
 from telebot import TeleBot
 import yt_dlp
 
+# =========================
+# CONFIG
+# =========================
 TOKEN = "8272287740:AAGZvU8KGZJlLNpBNzfzKHLu1nGthOkyQLY"
 bot = TeleBot(TOKEN)
 
-MAX_FILE_SIZE = 49 * 1024 * 1024
+MAX_FILE_SIZE = 49 * 1024 * 1024  # 49 MB
 SEND_TIMEOUT = 300
 LAST_URL = None
 
@@ -22,7 +25,7 @@ class MyLogger:
     def error(self, msg): print(f"[yt_dlp ERROR] {msg}")
 
 # =========================
-# CLEANUP
+# CLEANUP TEMP DIR
 # =========================
 def cleanup(temp_dir):
     if temp_dir:
@@ -30,7 +33,7 @@ def cleanup(temp_dir):
         except: pass
 
 # =========================
-# AUDIO → MP3
+# CONVERT AUDIO → MP3
 # =========================
 def convert_to_mp3(audio_path: Path) -> Path:
     try:
@@ -53,13 +56,9 @@ def convert_to_mp3(audio_path: Path) -> Path:
 def download_spotify(url: str):
     temp_dir = tempfile.mkdtemp()
     try:
-        with yt_dlp.YoutubeDL({
-            "quiet": True,
-            "noplaylist": True,
-            "extract_flat": True
-        }) as ydl:
+        # Extract metadata
+        with yt_dlp.YoutubeDL({"quiet": True, "noplaylist": True, "extract_flat": True}) as ydl:
             info = ydl.extract_info(url, download=False)
-
         title = info.get("title") or ""
         artist = info.get("artist") or info.get("uploader") or ""
         query = f"{artist} - {title}".strip(" -") or title or "popular song 2026"
@@ -68,15 +67,15 @@ def download_spotify(url: str):
             "format": "bestaudio/best",
             "outtmpl": os.path.join(temp_dir, "%(title)s.%(ext)s"),
             "default_search": "ytsearch1:",
-            "quiet": False
+            "quiet": False,
+            "noplaylist": True
         }
-
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(query, download=True)
             file_path = info.get("requested_downloads", [{}])[0].get("filepath") or ydl.prepare_filename(info)
 
-        mp3 = convert_to_mp3(Path(file_path))
-        return str(mp3), temp_dir
+        mp3_file = convert_to_mp3(Path(file_path))
+        return str(mp3_file), temp_dir
 
     except Exception as e:
         print(f"[SPOTIFY ERROR] {e}")
@@ -88,7 +87,6 @@ def download_spotify(url: str):
 # =========================
 def download_file(url: str):
     temp_dir = tempfile.mkdtemp()
-
     ydl_opts = {
         "format": "bestvideo[height<=720]+bestaudio/best/best",
         "outtmpl": os.path.join(temp_dir, "%(title)s.%(ext)s"),
@@ -96,21 +94,17 @@ def download_file(url: str):
         "quiet": False,
         "logger": MyLogger(),
         "retries": 5,
-        "http_headers": {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
-        },
+        "http_headers": {"User-Agent": "Mozilla/5.0"},
         "extractor_args": {
             "instagram": {"impersonate": True},
             "tiktok": {"impersonate": True}
         }
     }
-
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
             file_path = info.get("requested_downloads", [{}])[0].get("filepath") or ydl.prepare_filename(info)
         return file_path, temp_dir
-
     except Exception as e:
         print(f"[DOWNLOAD ERROR] {e}")
         cleanup(temp_dir)
@@ -125,15 +119,12 @@ def send_media(chat_id, file_path):
         if not path.exists():
             bot.send_message(chat_id, "❌ File missing.")
             return
-
         size_mb = path.stat().st_size // (1024*1024)
-
         with open(path, "rb") as f:
             if path.suffix.lower() == ".mp3":
                 bot.send_audio(chat_id, f, caption=f"✅ Done ({size_mb}MB)", timeout=SEND_TIMEOUT)
             else:
                 bot.send_video(chat_id, f, caption=f"✅ Done ({size_mb}MB)", supports_streaming=True, timeout=SEND_TIMEOUT)
-
     except Exception as e:
         print(f"[SEND ERROR] {e}")
         bot.send_message(chat_id, "⚠️ Failed to send file.")
@@ -147,7 +138,8 @@ def start(message):
         message.chat.id,
         "🚀 Bot Online!\n\n"
         "• YouTube / TikTok / Instagram → Video\n"
-        "• Spotify → MP3"
+        "• Spotify → MP3\n"
+        "Send any link to start!"
     )
 
 @bot.message_handler(func=lambda m: m.text)
@@ -173,11 +165,13 @@ def handle(message):
         if file_path:
             send_media(message.chat.id, file_path)
         else:
-            bot.send_message(message.chat.id, "❌ Download failed.")
+            bot.send_message(message.chat.id, "❌ Download failed. Try a different link.")
 
     except Exception as e:
         print(f"[HANDLER ERROR] {e}")
-        bot.send_message(message.chat.id, "⚠️ Error occurred.")
+        try: bot.delete_message(message.chat.id, status.message_id)
+        except: pass
+        bot.send_message(message.chat.id, "⚠️ Unexpected error.")
     finally:
         cleanup(temp_dir)
 
@@ -185,5 +179,6 @@ def handle(message):
 # RUN BOT
 # =========================
 if __name__ == "__main__":
-    print("🚀 Bot running...")
+    print("🚀 Bot running - Spotify → MP3 | Video → YT/IG/TikTok")
+    bot.remove_webhook()  # Fixes 409 conflict
     bot.infinity_polling(timeout=60, long_polling_timeout=60)
