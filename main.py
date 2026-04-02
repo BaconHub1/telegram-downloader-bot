@@ -13,7 +13,7 @@ import yt_dlp
 TOKEN = "8272287740:AAFVY5tHErqaj_llBrBFLnmZskckJEsAE7U"
 bot = TeleBot(TOKEN)
 
-MAX_FILE_SIZE = 49 * 1024 * 1024
+MAX_FILE_SIZE = 49 * 1024 * 1024  # MB limit
 LAST_URL = None
 COOKIE_FILE = "cookies.txt"
 
@@ -28,20 +28,29 @@ def cleanup(temp_dir):
 # SAFE DOWNLOAD
 # =========================
 def safe_download(url, temp_dir, ydl_opts):
+    def progress_hook(d):
+        if d['status'] == 'downloading':
+            percent = d.get('_percent_str', '0%')
+            speed = d.get('_speed_str', '')
+            eta = d.get('_eta_str', '')
+            print(f"Downloading: {percent} at {speed} ETA {eta}")
+        elif d['status'] == 'finished':
+            print("✅ Download finished")
+
+    ydl_opts['progress_hooks'] = [progress_hook]
+
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
-
             if "requested_downloads" in info:
                 return info["requested_downloads"][0]["filepath"]
             return ydl.prepare_filename(info)
-
     except Exception as e:
         print("[DOWNLOAD FAILED]", e)
         return None
 
 # =========================
-# VIDEO DOWNLOAD (IG + TikTok)
+# VIDEO DOWNLOAD (IG + TikTok + YouTube)
 # =========================
 def download_file(url):
     temp_dir = tempfile.mkdtemp()
@@ -60,7 +69,7 @@ def download_file(url):
         "cookiefile": COOKIE_FILE if os.path.exists(COOKIE_FILE) else None,
     }
 
-    # 🔥 BEST (needs ffmpeg)
+    # Best quality (needs ffmpeg)
     opts1 = {
         **base_opts,
         "format": "bestvideo[height<=720]+bestaudio/best",
@@ -69,7 +78,7 @@ def download_file(url):
 
     file_path = safe_download(url, temp_dir, opts1)
 
-    # 🔥 FALLBACK (no ffmpeg)
+    # Fallback (no ffmpeg)
     if not file_path:
         print("[FALLBACK MODE]")
         opts2 = {
@@ -142,9 +151,8 @@ def send_media(chat_id, file_path):
         return
 
     size_mb = path.stat().st_size // (1024 * 1024)
-
-    if size_mb > 49:
-        bot.send_message(chat_id, "❌ File too large (49MB limit).")
+    if size_mb > MAX_FILE_SIZE:
+        bot.send_message(chat_id, f"❌ File too large ({size_mb}MB). Limit: {MAX_FILE_SIZE}MB")
         return
 
     with open(path, "rb") as f:
@@ -202,7 +210,7 @@ def handle(message):
         cleanup(temp_dir)
 
 # =========================
-# RUN BOT (ELITE 409 FIX)
+# RUN BOT (409 FIX)
 # =========================
 def run_bot():
     while True:
