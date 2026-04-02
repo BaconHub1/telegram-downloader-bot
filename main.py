@@ -1,10 +1,15 @@
 import os
+import shutil
+import tempfile
+import subprocess
+from pathlib import Path
 from telebot import TeleBot
+import yt_dlp
 
 # =========================
 # CONFIG
 # =========================
-TOKEN = os.getenv("TOKEN")  # <-- DO NOT put your token here
+TOKEN = os.getenv("TOKEN")  # <-- Railway environment variable
 
 if not TOKEN:
     raise ValueError("TOKEN not set in Railway variables")
