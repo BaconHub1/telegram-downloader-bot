@@ -32,10 +32,8 @@ def safe_download(url, temp_dir, ydl_opts):
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
 
-            # 🔥 Better file detection
             if "requested_downloads" in info:
                 return info["requested_downloads"][0]["filepath"]
-
             return ydl.prepare_filename(info)
 
     except Exception as e:
@@ -43,10 +41,15 @@ def safe_download(url, temp_dir, ydl_opts):
         return None
 
 # =========================
-# VIDEO DOWNLOAD (IG FIXED)
+# VIDEO DOWNLOAD (IG + TikTok)
 # =========================
 def download_file(url):
     temp_dir = tempfile.mkdtemp()
+
+    if os.path.exists(COOKIE_FILE):
+        print("[INFO] Using Instagram cookies")
+    else:
+        print("[WARNING] No cookies.txt found")
 
     base_opts = {
         "outtmpl": os.path.join(temp_dir, "%(title)s.%(ext)s"),
@@ -57,7 +60,7 @@ def download_file(url):
         "cookiefile": COOKIE_FILE if os.path.exists(COOKIE_FILE) else None,
     }
 
-    # 🔥 TRY BEST (needs ffmpeg)
+    # 🔥 BEST (needs ffmpeg)
     opts1 = {
         **base_opts,
         "format": "bestvideo[height<=720]+bestaudio/best",
@@ -66,12 +69,13 @@ def download_file(url):
 
     file_path = safe_download(url, temp_dir, opts1)
 
-    # 🔥 FALLBACK (NO FFMPEG — VERY IMPORTANT)
+    # 🔥 FALLBACK (no ffmpeg)
     if not file_path:
         print("[FALLBACK MODE]")
         opts2 = {
             **base_opts,
             "format": "best[ext=mp4]/best",
+            "force_generic_extractor": False,
         }
         file_path = safe_download(url, temp_dir, opts2)
 
@@ -107,10 +111,7 @@ def download_spotify(url):
 
         title = info.get("title") or ""
         artist = info.get("artist") or ""
-        query = f"{artist} {title}".strip()
-
-        if not query:
-            query = "popular song"
+        query = f"{artist} - {title}".strip() or "popular song"
 
         ydl_opts = {
             "format": "bestaudio/best",
@@ -153,13 +154,13 @@ def send_media(chat_id, file_path):
             bot.send_video(chat_id, f, caption=f"✅ {size_mb}MB", supports_streaming=True)
 
 # =========================
-# HANDLER
+# BOT HANDLERS
 # =========================
 @bot.message_handler(commands=['start'])
 def start(message):
     bot.send_message(
         message.chat.id,
-        "🚀 Bot Ready!\n\n"
+        "🚀 Elite Downloader Bot Ready!\n\n"
         "Send a link:\n"
         "• Instagram (public/private)\n"
         "• TikTok\n"
@@ -172,15 +173,10 @@ def handle(message):
     global LAST_URL
 
     url = message.text.strip()
-
-    if not url.startswith("http"):
-        return
-
-    if url == LAST_URL:
+    if not url.startswith("http") or url == LAST_URL:
         return
 
     LAST_URL = url
-
     msg = bot.send_message(message.chat.id, "⏳ Downloading...")
     temp_dir = None
 
@@ -190,10 +186,8 @@ def handle(message):
         else:
             file_path, temp_dir = download_file(url)
 
-        try:
-            bot.delete_message(message.chat.id, msg.message_id)
-        except:
-            pass
+        try: bot.delete_message(message.chat.id, msg.message_id)
+        except: pass
 
         if file_path:
             send_media(message.chat.id, file_path)
@@ -208,18 +202,20 @@ def handle(message):
         cleanup(temp_dir)
 
 # =========================
-# RUN (409 FIX LOOP)
+# RUN BOT (ELITE 409 FIX)
 # =========================
 def run_bot():
     while True:
         try:
-            print("🚀 Running...")
+            print("🚀 Running Elite Bot...")
+            bot.remove_webhook()
+            bot.get_updates(offset=-1)
             bot.infinity_polling(skip_pending=True, timeout=60, long_polling_timeout=60)
 
         except apihelper.ApiTelegramException as e:
             if "409" in str(e):
-                print("⚠️ 409 conflict - retrying...")
-                time.sleep(5)
+                print("⚠️ 409 conflict - retrying in 3s...")
+                time.sleep(3)
             else:
                 print("[TELEGRAM ERROR]", e)
                 time.sleep(5)
