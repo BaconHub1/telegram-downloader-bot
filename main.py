@@ -1,18 +1,20 @@
 import os
-import shutil
-import subprocess
 import tempfile
+import subprocess
+import shutil
 from pathlib import Path
+import telebot
 from telebot import TeleBot
 import yt_dlp
 
 # =========================
 # CONFIG
 # =========================
-TOKEN = os.getenv("TOKEN")  # <-- Make sure TOKEN is set in Railway Variables
+# Better variable name (more standard)
+TOKEN = os.getenv("TELEGRAM_BOT_TOKEN") or os.getenv("TOKEN")
 
 if not TOKEN:
-    raise ValueError("TOKEN not set in Railway variables")
+    raise ValueError("❌ TELEGRAM_BOT_TOKEN (or TOKEN) not set in Railway variables!")
 
 bot = TeleBot(TOKEN)
 
@@ -60,14 +62,14 @@ def convert_to_mp3(audio_path: Path) -> Path:
         return audio_path
 
 # =========================
-# SPOTIFY → YOUTUBE SEARCH
+# SPOTIFY → YOUTUBE
 # =========================
 def download_spotify(url: str):
     temp_dir = tempfile.mkdtemp()
     try:
         with yt_dlp.YoutubeDL({"quiet": True, "extract_flat": True, "noplaylist": True}) as ydl:
             info = ydl.extract_info(url, download=False)
-
+        
         title = info.get("title") or ""
         artist = info.get("artist") or info.get("uploader") or ""
         query = f"{artist} - {title}".strip(" -") or title or "popular song"
@@ -79,14 +81,12 @@ def download_spotify(url: str):
             "quiet": False,
             "nocheckcertificate": True
         }
-
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(query, download=True)
             file_path = ydl.prepare_filename(info)
 
         mp3 = convert_to_mp3(Path(file_path))
         return str(mp3), temp_dir
-
     except Exception as e:
         print(f"[SPOTIFY ERROR] {e}")
         cleanup(temp_dir)
@@ -107,13 +107,11 @@ def download_file(url: str):
         "nocheckcertificate": True,
         "http_headers": {"User-Agent": "Mozilla/5.0"},
     }
-
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
             file_path = ydl.prepare_filename(info)
         return file_path, temp_dir
-
     except Exception as e:
         print(f"[DOWNLOAD ERROR] {e}")
         cleanup(temp_dir)
@@ -131,17 +129,15 @@ def send_media(chat_id, file_path):
 
         size = path.stat().st_size
         if size > MAX_FILE_SIZE:
-            bot.send_message(chat_id, "❌ File too large (limit 49MB).")
+            bot.send_message(chat_id, "❌ File too large (max 49MB).")
             return
 
         size_mb = size // (1024 * 1024)
-
         with open(path, "rb") as f:
             if path.suffix.lower() == ".mp3":
                 bot.send_audio(chat_id, f, caption=f"✅ Done ({size_mb}MB)", timeout=SEND_TIMEOUT)
             else:
                 bot.send_video(chat_id, f, caption=f"✅ Done ({size_mb}MB)", supports_streaming=True, timeout=SEND_TIMEOUT)
-
     except Exception as e:
         print(f"[SEND ERROR] {e}")
         bot.send_message(chat_id, "⚠️ Failed to send file.")
@@ -151,43 +147,48 @@ def send_media(chat_id, file_path):
 # =========================
 @bot.message_handler(commands=['start'])
 def start(message):
-    if message.from_user.id not in ALLOWED_USERS: return
-    bot.send_message(message.chat.id, "🚀 Bot Online\n\nSend a link!")
+    if message.from_user.id not in ALLOWED_USERS:
+        return
+    bot.send_message(message.chat.id, "🚀 Bot is Online!\n\nSend me a YouTube, Spotify, or any video link.")
 
 # =========================
-# MESSAGE HANDLER
+# MAIN MESSAGE HANDLER
 # =========================
 @bot.message_handler(func=lambda m: m.text)
 def handle(message):
     global LAST_URL
-    if message.from_user.id not in ALLOWED_USERS: return
+    if message.from_user.id not in ALLOWED_USERS:
+        return
 
     url = message.text.strip()
-    if not url.startswith(("http://", "https://")): return
-    if url == LAST_URL: return
+    if not url.startswith(("http://", "https://")):
+        return
+    if url == LAST_URL:  # prevent duplicate downloads
+        return
+
     LAST_URL = url
 
-    status = bot.send_message(message.chat.id, "⏳ Downloading...")
-    temp_dir = None
+    status = bot.send_message(message.chat.id, "⏳ Downloading... Please wait.")
 
+    temp_dir = None
     try:
-        if "spotify.com" in url:
+        if "spotify.com" in url.lower():
             file_path, temp_dir = download_spotify(url)
         else:
             file_path, temp_dir = download_file(url)
 
-        try: bot.delete_message(message.chat.id, status.message_id)
-        except: pass
+        try:
+            bot.delete_message(message.chat.id, status.message_id)
+        except:
+            pass
 
         if file_path:
             send_media(message.chat.id, file_path)
         else:
             bot.send_message(message.chat.id, "❌ Download failed.")
-
     except Exception as e:
         print(f"[HANDLER ERROR] {e}")
-        bot.send_message(message.chat.id, "⚠️ Error occurred.")
-
+        bot.send_message(message.chat.id, "⚠️ An error occurred while processing.")
     finally:
         cleanup(temp_dir)
 
@@ -195,5 +196,6 @@ def handle(message):
 # RUN BOT
 # =========================
 if __name__ == "__main__":
-    print("🚀 Bot running...")
+    print("🚀 Bot starting...")
+    print(f"✅ TOKEN loaded: {'Yes' if TOKEN else 'No'}")
     bot.infinity_polling(timeout=60, long_polling_timeout=60)
